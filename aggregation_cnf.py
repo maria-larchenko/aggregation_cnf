@@ -20,7 +20,7 @@ data_im_name = lambda cond_id: f"{cond_id}_h=6_D=2_v=1.0_angle=30 0_res_100.ppm"
 
 data_name = "dataset_S10 D=1e0"
 data_url = "./datasets/dataset_S10"
-data_im_name = lambda cond_id: f"{cond_id}_h=6_D=e0_v=1.0_angle=30 5_res_100.ppm"
+data_im_name = lambda cond_id: f"{cond_id}_h=6_D=e0_v=1.0_angle=30 0_res_100.ppm"
 
 dataset = DatasetImg(data_url, data_im_name, name=data_name)
 x_conditions = dataset.x_conditions
@@ -29,16 +29,16 @@ xedges = np.arange(0, im_size) / im_size
 output = f'./output_2d/{data_name}'
 
 # --------------- hyperparams & visualization
-batches_number = 100
+batches_number = 5000
 conditions_per_batch = 10
 samples = 2048
 batch_size = conditions_per_batch * samples
-lr = 1e-4
+lr = 1e-6
 test_size = 3000
 ms = 1
 
 # --------------- model load
-loaded = False # "output_2d/trained_3/5300/2D_mono_h=6_D=2_v=1.0_angle=30_model"
+loaded = "output_2d/dataset_S10 D=1e0/5300/dataset_S10 D=1e0_model"
 device = torch.device('cpu')
 model = ConditionalRealNVP(in_dim=1, cond_dim=2, layers=8, hidden=2024, T=2, cond_prior=False, device=device)
 optim = torch.optim.Adam(model.parameters(), lr=lr)
@@ -109,8 +109,8 @@ for e in t:
     # scheduler.step()
 
 print("Inverse pass")
-check_x_s = [0.1, 0.5, 0.8]
-check_y_s = [0.1, 0.1, 0.5]
+check_x_s = [0.5, 0.5, 0.8]
+check_y_s = [0.1, 0.5, 0.5]
 generated = []
 true_pdf = []
 for x_s, y_s in zip(check_x_s, check_y_s):

@@ -17,9 +17,10 @@ data_name = "2D_mono_h=6_D=2_v=1.0_angle=30"
 data_url = "./datasets/2D_mono_h=6_D=2_v=1.0_angle=30"
 data_im_name = lambda cond_id: f"{cond_id}_h=6_D=2_v=1.0_angle=30 0_res_100.ppm"
 
-# data_name = "dataset_S10 D=1e0"
-# data_url = "./datasets/dataset_S10"
-# data_im_name = lambda cond_id: f"{cond_id}_h=6_D=e0_v=1.0_angle=30 5_res_100.ppm"
+data_name = "dataset_S10 D=1e0"
+data_url = "./datasets/dataset_S10"
+data_im_name = lambda cond_id: f"{cond_id}_h=6_D=e0_v=1.0_angle=30 0_res_100.ppm"
+x_conditions = np.loadtxt(data_url + "/_x_conditions.txt")
 
 dataset = DatasetImg(data_url, data_im_name, name=data_name)
 im_size = 256
@@ -30,19 +31,19 @@ contour_levels = 10
 device = torch.device('cpu')
 replace_nan = True
 
-path_to_model = "output_2d/2D_mono_h=6_D=2_v=1.0_angle=30/trained_3/6300/2D_mono_h=6_D=2_v=1.0_angle=30_model"
-model_name = "3200, lr=1e-4 batch= 2048 * 20, N(0.5, 1) prior"
+# path_to_model = "output_2d/2D_mono_h=6_D=2_v=1.0_angle=30/trained/500k, lr=5e-6, batch=1024/2D_mono_h=6_D=2_v=1.0_angle=30_model"
+# model_name = "500k, lr=5e-6 batch=1024 * 1, N(0, 1) prior"
 
-path_to_model = "output_2d/2D_mono_h=6_D=2_v=1.0_angle=30/trained/500k, lr=5e-6, batch=1024/2D_mono_h=6_D=2_v=1.0_angle=30_model"
-model_name = "500k, lr=5e-6 batch=1024 * 1, N(0, 1) prior"
+path_to_model = "output_2d/dataset_S10 D=1e0/10300/dataset_S10 D=1e0_model"
+model_name = "10300, lr: 1e-5, batch: 2048 * 10, N(0.5, 1) prior"
 
 model_name += ", nan -> inf" if replace_nan else ""
-model = ConditionalRealNVP(in_dim=1, cond_dim=2, layers=8, hidden=1024, T=2, cond_prior=False, device=device, replace_nan=replace_nan)
+model = ConditionalRealNVP(in_dim=1, cond_dim=2, layers=8, hidden=2024, T=2, cond_prior=False, device=device, replace_nan=replace_nan)
 model.load_state_dict(torch.load(path_to_model, map_location=device))
 
 # --------------- test loop
-check_x_s = [.9]
-check_y_s = [.9]
+check_x_s = [.5]
+check_y_s = [.5]
 true_pdfs = []
 trained_pdfs = []
 generated = []
@@ -50,11 +51,11 @@ hists = []
 errors = []
 nan_points = []
 inf_points = []
-#
-# for i in range(0, 20):
-#     x_s, y_s = np.random.choice(x_conditions, size=2)
-#     check_x_s.append(x_s)
-#     check_y_s.append(y_s)
+
+for i in range(0, 20):
+    x_s, y_s = np.random.choice(x_conditions, size=2)
+    check_x_s.append(x_s)
+    check_y_s.append(y_s)
 
 print(f"SEED: {seed}")
 with torch.no_grad():
