@@ -21,7 +21,8 @@ class DatasetImg:
         self.get_im_name = get_im_name  # is a function of cond_id
         self.x_conditions = np.loadtxt(f"{data_loc}/_x_conditions.txt") if x_conditions is None else x_conditions
         self.name = name if name is not None else data_loc
-        self.dataset = self.read_dataset()
+        self.dataset, self.im_size = self.read_dataset()
+        self.xedges = np.arange(0, self.im_size) / self.im_size
 
     def read_dataset(self,):
         dataset = {}
@@ -32,7 +33,8 @@ class DatasetImg:
                 url = f"{self.data_loc}/{im_name}"
                 im = read_image(url)
                 dataset[cond_id] = im
-        return dataset
+        im_size = len(im)
+        return dataset, im_size
 
     def get_im(self, x_s, y_s):
         cond_id = self.get_cond_id(x_s, y_s)
