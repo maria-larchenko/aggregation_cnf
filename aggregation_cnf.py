@@ -81,17 +81,17 @@ if __name__ == '__main__':
     output = f'./output_2d/{data_name}'
 
     # --------------- hyperparams & visualization
-    batches_number = 100
-    conditions_per_batch = 20
-    samples = 2048
+    batches_number = 1000
+    conditions_per_batch = 10
+    samples = 2048 * 2
     batch_size = conditions_per_batch * samples
-    lr = 1e-4
+    lr = 1e-6
     test_size = 3000
     ms = 1
-    processes = 8
+    processes = 10
 
     # --------------- model load
-    loaded = False  # "output_2d/dataset_S10 D=1e0/10300/dataset_S10 D=1e0_model"
+    loaded = "output_2d/dataset_S10 D=1e0/11300/dataset_S10 D=1e0_model"
     print(f"CNF with {processes} processes")
     print(f"SEED: {seed}")
     torch.manual_seed(seed)
@@ -174,7 +174,7 @@ if __name__ == '__main__':
 
     torch.save(model.state_dict(), f'{output}_model')
     np.savetxt(f'{output}_conditions.txt', x_conditions)
-    np.savetxt(f'{output}_info.txt', x_conditions)
+    np.savetxt(f'{output}_info.txt', fig_title)
     np.savetxt(f'{output}_loss.txt', loss_track)
     fig.savefig(f'{output}_inverse_pass.png')
     fig2.savefig(f'{output}_loss.png')
