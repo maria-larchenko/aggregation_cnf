@@ -17,10 +17,14 @@ class ConditionalAffineTransformer(nn.Module):
         self.scale_net = nn.Sequential(
             nn.Linear(input_dim + condition_dim, hidden),
             nn.LeakyReLU(),
+            nn.Linear(hidden, hidden),
+            nn.LeakyReLU(),
             nn.Linear(hidden, input_dim),
         )
         self.translation_net = nn.Sequential(
             nn.Linear(input_dim + condition_dim, hidden),
+            nn.LeakyReLU(),
+            nn.Linear(hidden, hidden),
             nn.LeakyReLU(),
             nn.Linear(hidden, input_dim),
         )
@@ -82,12 +86,13 @@ class ConditionalAffineTransformer(nn.Module):
 
 
 class ConditionalRealNVP(nn.Module):
-    def __init__(self, in_dim, cond_dim, layers=4, hidden=512, T=1, cond_prior=False, device=None, replace_nan=False):
+    def __init__(self, in_dim, cond_dim, layers=4, hidden=512, T=1, external_prior=True, device=None, replace_nan=False):
         super().__init__()
         self.layers = layers
         self.hidden = hidden
         self.input_dim = in_dim
         self.condition_dim = cond_dim
+        self.external_prior = external_prior
         self.split = 1  # hardcoded for in, out = 1, 1
         self.T=T
         ## masks zeroing (x, y)-input for 2-input NNs seemingly lead to vanishing grads.
@@ -103,18 +108,6 @@ class ConditionalRealNVP(nn.Module):
             for _ in range(0, layers)
         ])
         self.replace_nan = replace_nan
-        self.cond_prior = cond_prior
-        if cond_prior:
-            self.prior_mean_net = nn.Sequential(
-                nn.Linear(1, hidden),
-                nn.LeakyReLU(),
-                nn.Linear(hidden, self.input_dim),
-            )
-            self.prior_scale_net = nn.Sequential(
-                nn.Linear(1, hidden),
-                nn.LeakyReLU(),
-                nn.Linear(hidden, 1),
-            )
         self.noise = None
         if device is not None:
             self.device = device
@@ -123,26 +116,31 @@ class ConditionalRealNVP(nn.Module):
     def cond_base_dist(self, cond):
         base_mu = torch.zeros(2, device=self.device)  # hardcoded for 2D
         base_cov = torch.eye(2, device=self.device)
-        if self.cond_prior:
-            mean = self.prior_mean_net(cond)[0]
-            scale = torch.exp(self.prior_scale_net(cond))[0]
-            base_mu = base_mu + mean
-            base_cov = base_cov * scale
+        # if cond_prior_pdf:
+        #     mean = self.prior_mean_net(cond)[0]
+        #     scale = torch.exp(self.prior_scale_net(cond))[0]
+        #     base_mu = base_mu + mean
+        #     base_cov = base_cov * scale
         base_dist = MultivariateNormal(base_mu, base_cov)
         return base_dist
 
-    def forward(self, x, cond):
+    def forward(self, x, cond, base_llk=None):
         log_determinant = 0
         for i in range(0, self.layers):
             alternate = self.alternate[i]
             transformer = self.transformers[i]
             x, scale, _ = transformer(x, cond, alternate)
             log_determinant += torch.log(scale).sum(1)
-        log_likelihood = self.cond_base_dist(cond).log_prob(x)  # log likelihood of sample under the base measure
+        if base_llk is None:
+            assert not self.external_prior
+            log_likelihood = self.cond_base_dist(cond).log_prob(x)  # log likelihood of sample under the base measure
+        else:
+            assert self.external_prior
+            log_likelihood = base_llk
         model_loss = - (log_determinant + log_likelihood).mean()
         return x, model_loss
 
-    def forward_x(self, x, cond):
+    def forward_x(self, x, cond, base_llk=None):
         log_determinant = 0
         for i in range(0, self.layers):
             alternate = self.alternate[i]
@@ -151,35 +149,38 @@ class ConditionalRealNVP(nn.Module):
             log_determinant += torch.log(scale).sum(1)
         nans = torch.isnan(x)
         infs = torch.isinf(x)
-        log_pdf = torch.zeros((len(x)))
-        if not torch.any(nans):
-            log_likelihood = self.cond_base_dist(cond).log_prob(x)  # log likelihood of sample under the base measure
-            log_pdf = log_determinant + log_likelihood
-        elif self.replace_nan:
+        if torch.any(nans) and self.replace_nan:
+            assert not self.external_prior
             print(f"model.forward_x:  NAN -> INF for {torch.count_nonzero(infs)} points")
             inf = torch.tensor(torch.inf, dtype=torch.float32)
             x = torch.where(torch.isnan(x), inf, x)
+        if base_llk is None:
             log_likelihood = self.cond_base_dist(cond).log_prob(x)  # log likelihood of sample under the base measure
-            log_pdf = log_determinant + log_likelihood
+        else:
+            assert self.external_prior
+            log_likelihood = base_llk
+        log_pdf = log_determinant + log_likelihood
         return x, log_pdf, nans, infs
 
     def inverse(self, batch_size, cond):
+        assert not self.external_prior
         base_dist = self.cond_base_dist(cond)
-        y = base_dist.rsample((batch_size,))
-        self.noise = y
-        log_likelihood = base_dist.log_prob(y)  # log likelihood of noise under the base measure
+        z = base_dist.rsample((batch_size,))
+        log_likelihood = base_dist.log_prob(z)  # log likelihood of noise under the base measure
+        self.noise = z
         log_determinant = 0
         for i in reversed(range(0, self.layers)):
             alternate = self.alternate[i]
             transformer = self.transformers[i]
-            y, scale, _ = transformer.inverse(y, cond, alternate)
+            z, scale, _ = transformer.inverse(z, cond, alternate)
             log_determinant += torch.log(scale).sum(1)
         model_loss = - (log_determinant - log_likelihood).mean()
-        return y, model_loss
+        return z, model_loss
 
-    def inverse_z(self, z, cond):
-        base_dist = self.cond_base_dist(cond)
-        log_likelihood = base_dist.log_prob(z)  # log likelihood of noise under the base measure
+    def inverse_z(self, z, cond, base_llk):
+        assert self.external_prior
+        log_likelihood = base_llk
+        self.noise = z
         log_determinant = 0
         for i in reversed(range(0, self.layers)):
             alternate = self.alternate[i]

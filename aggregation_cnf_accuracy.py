@@ -38,7 +38,7 @@ path_to_model = "output_2d/dataset_S10 D=1e0/10300/dataset_S10 D=1e0_model"
 model_name = "10300, lr: 1e-5, batch: 2048 * 10, N(0.5, 1) prior"
 
 model_name += ", nan -> inf" if replace_nan else ""
-model = ConditionalRealNVP(in_dim=1, cond_dim=2, layers=8, hidden=2024, T=2, cond_prior=False, device=device, replace_nan=replace_nan)
+model = ConditionalRealNVP(in_dim=1, cond_dim=2, layers=8, hidden=2024, T=2, device=device, replace_nan=replace_nan)
 model.load_state_dict(torch.load(path_to_model, map_location=device))
 
 # --------------- test loop
@@ -52,7 +52,7 @@ errors = []
 nan_points = []
 inf_points = []
 
-for i in range(0, 20):
+for i in range(0, 0):
     x_s, y_s = np.random.choice(x_conditions, size=2)
     check_x_s.append(x_s)
     check_y_s.append(y_s)

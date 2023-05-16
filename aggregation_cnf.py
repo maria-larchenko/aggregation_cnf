@@ -10,88 +10,114 @@ from aggregation.CNF import ConditionalRealNVP
 from aggregation.Dataset import DatasetImg
 
 
-def direct_mc(im, xedges, sample_size=1024):
+def direct_mc(im, xedges, sample_size=1024, prior_im=None):
     scale = int(np.max(im)) + 1
     sample = np.zeros((sample_size, 2))
+    base_llk, prior_log_pdf = None, None
+    if prior_im is not None:
+        base_llk = np.zeros(sample_size)
+        prior_log_pdf = np.log(prior_im / np.sum(prior_im))
     i = 0
     while i < sample_size:
         x, y = np.random.uniform(low=0, high=1, size=2)
         ind_x = np.argmax(np.where(xedges > x, 1, 0))
         ind_y = np.argmax(np.where(xedges > y, 1, 0))
-        if np.random.uniform() * scale <= im[ind_x, ind_y]:
+        if scale * np.random.uniform() <= im[ind_x, ind_y]:
             sample[i, 0] = x
             sample[i, 1] = y
+            if prior_im is not None:
+                base_llk[i] = prior_log_pdf[ind_x, ind_y]
             i += 1
-    return sample
+    return sample, base_llk
 
-def get_conditioned_sample(im, xedges, conds, size, device=None):
-    x_s, y_s = conds[0], conds[1]
-    sample = direct_mc(im, xedges, size)
+def get_conditioned_sample(im, xedges, conds, sample_size, prior_im=None, device=None):
+    sample, base_llk = direct_mc(im, xedges, sample_size, prior_im)
     sample = torch.as_tensor(sample, dtype=torch.float32)
-    cond_x = torch.full_like(sample[:, :1], x_s)
-    cond_y = torch.full_like(sample[:, :1], y_s)
-    cond = torch.column_stack((cond_x, cond_y))
+    base_llk = torch.as_tensor(base_llk, dtype=torch.float32) if base_llk is not None else None
+    conditions = torch.zeros((sample_size, len(conds)), device=device)
+    for i in range(0, len(conds)):
+        conditions[:, i] = conds[i]
     if device is not None:
-        cond = cond.to(device)
         sample = sample.to(device)
-    return cond, sample
+        conditions = conditions.to(device)
+        base_llk = base_llk.to(device) if base_llk is not None else None
+    return conditions, sample, base_llk
 
-def prepare_batch_args(process_num, size, dataset, device):
+def prepare_batch_args(process_num, sample_size, dataset, cond_prior, device):
     pool_args = []
-    xedges = dataset.xedges
     for _ in range(process_num):
-        x_s, y_s = np.random.choice(dataset.x_conditions, size=2)
-        im = dataset.get_im(x_s, y_s)
-        pool_args.append((im, xedges, (x_s, y_s), size, device))
+        x_s, y_s = np.random.choice(x_sources, size=2)
+        alpha = np.random.choice(alphas)
+        im = dataset.get_im(x_s, y_s, alpha, data_s)
+        prior_im = dataset.get_im(x_s, y_s, alpha, prior_s) if cond_prior else None
+        pool_args.append((im, dataset.xedges, (x_s, y_s, alpha), sample_size, prior_im, device))
     return pool_args
 
-def get_conditioned_batch(dataset, processes, size, conds_per_batch=1, device=None):
-    conds, batch = [], []
+def get_conditioned_batch(dataset, processes, sample_size, conds_per_batch=1, cond_prior=False, device=None,):
+    conds, batch, base_llk = [], [], []
     runs = int(np.floor(conds_per_batch / processes))
     residual = conds_per_batch - processes * runs
     with Pool(processes=processes) as pool:
         for r in range(runs):
-            pool_args = prepare_batch_args(processes, size, dataset, device)
+            pool_args = prepare_batch_args(processes, sample_size, dataset, cond_prior, device)
             results = pool.starmap(get_conditioned_sample, pool_args)
             for result in results:
                 conds.append(result[0])
                 batch.append(result[1])
+                base_llk.append(result[2])
         if residual > 0:
-            pool_args = prepare_batch_args(residual, size, dataset, device)
+            pool_args = prepare_batch_args(residual, sample_size, dataset, cond_prior, device)
             results = pool.starmap(get_conditioned_sample, pool_args)
             for result in results:
                 conds.append(result[0])
                 batch.append(result[1])
-    return torch.cat(conds, dim=0), torch.cat(batch, dim=0)
+                base_llk.append(result[2])
+    conds = torch.cat(conds, dim=0)
+    batch = torch.cat(batch, dim=0)
+    base_llk = torch.cat(base_llk, dim=0) if cond_prior else None
+    return conds, batch, base_llk
 
 if __name__ == '__main__':
     seed = 2346  # np.random.randint(10_000)
 
-    # --------------- dataset
-    data_name = "2D_mono_h=6_D=2_v=1.0_angle=30"
-    data_url = "./datasets/2D_mono_h=6_D=2_v=1.0_angle=30"
-    data_im_name = lambda cond_id: f"{cond_id}_h=6_D=2_v=1.0_angle=30 0_res_100.ppm"
+    # # --------------- dataset
+    # data_name = "2D_mono_h=6_D=2_v=1.0_angle=30"
+    # data_url = "./datasets/2D_mono_h=6_D=2_v=1.0_angle=30"
+    # get_cond_id = lambda x_s, y_s: f"x={x_s}_y={y_s}"
+    # data_im_name = lambda cond_id: f"{cond_id}_h=6_D=2_v=1.0_angle=30 0_res_100.ppm"
+    #
+    # data_name = "dataset_S10 D=1e0"
+    # data_url = "./datasets/dataset_S10"
+    # get_cond_id = lambda x_s, y_s: f"x={x_s}_y={y_s}"
+    # data_im_name = lambda cond_id: f"{cond_id}  0_res_100.ppm"
 
-    data_name = "dataset_S10 D=1e0"
-    data_url = "./datasets/dataset_S10"
-    data_im_name = lambda cond_id: f"{cond_id}_h=6_D=e0_v=1.0_angle=30 0_res_100.ppm"
+    data_name = "dataset_S10_alpha"
+    data_url = "./datasets/dataset_S10_alpha"
+    get_cond_id = lambda x_s, y_s, alpha, n: f"x={x_s}_y={y_s}_angle={int(alpha)}  {int(n)}"
+    data_im_name = lambda cond_id: f"{cond_id}_res_100.ppm"
 
-    dataset = DatasetImg(data_url, data_im_name, name=data_name)
-    x_conditions = dataset.x_conditions
+    dataset = DatasetImg(data_url, get_cond_id, data_im_name, name=data_name)
+    condition_prior = True
+    x_sources = [(np.around(i * 0.1, decimals=3)) for i in range(1, 10)]
+    alphas = [0, 9, 18, 27, 36, 45, 54, 63, 72, 90]
+    prior_s = 0
+    data_s = 9
     output = f'./output_2d/{data_name}'
+    total_conditions = len(dataset.x_conditions) / 2
 
     # --------------- hyperparams & visualization
-    batches_number = 1000
+    batches_number = 10
     conditions_per_batch = 10
-    samples = 2048 * 2
+    samples = 1024 * 2
     batch_size = conditions_per_batch * samples
-    lr = 1e-6
+    lr = 1e-4
     test_size = 3000
     ms = 1
     processes = 10
 
     # --------------- model load
-    loaded = "output_2d/dataset_S10 D=1e0/11300/dataset_S10 D=1e0_model"
+    loaded = False
+    # loaded = "output_2d/dataset_S10 D=1e0/11300/dataset_S10 D=1e0_model"
     print(f"CNF with {processes} processes")
     print(f"SEED: {seed}")
     torch.manual_seed(seed)
@@ -108,7 +134,7 @@ if __name__ == '__main__':
     #     device_name = 'cpu'
     device = torch.device('cpu')
     device_name = 'cpu'
-    model = ConditionalRealNVP(in_dim=1, cond_dim=2, layers=8, hidden=2024, T=2, cond_prior=False, device=device)
+    model = ConditionalRealNVP(in_dim=1, cond_dim=3, layers=8, hidden=1024, T=2, external_prior=True, device=device)
     optim = torch.optim.Adam(model.parameters(), lr=lr)
     # scheduler = torch.optim.lr_scheduler.ExponentialLR(optim, 0.999)
 
@@ -118,14 +144,14 @@ if __name__ == '__main__':
         print(f"loaded model: {loaded}")
     print(f"START ConditionalRealNVP")
     print(f"dataset: {dataset.name} at {dataset.data_loc}")
-    print(f"total samples: {batch_size*batches_number}, total conditions: {len(x_conditions)**2}")
+    print(f"total samples: {batch_size*batches_number}, total conditions: {total_conditions}")
     sleep(0.01)
     loss_track = []
     t = trange(batches_number, desc='Bar desc', leave=True)
     for e in t:
-        conditions, batch = get_conditioned_batch(dataset, processes, samples, conditions_per_batch, device)
+        conditions, batch, base_llk = get_conditioned_batch(dataset, processes, samples, conditions_per_batch, condition_prior, device)
         optim.zero_grad()
-        x, loss = model(batch, conditions)
+        x, loss = model(batch, conditions, base_llk)
         loss_track.append(np.exp(loss.detach().cpu()))
         t.set_description(f"loss = {loss_track[-1]} |"
                           f" x_s = {np.around(float(conditions[0, 0]), decimals=5)}"
@@ -138,21 +164,24 @@ if __name__ == '__main__':
     print("Inverse pass")
     check_x_s = [0.5, 0.5, 0.8]
     check_y_s = [0.1, 0.5, 0.5]
+    check_a_s = [18, 45, 60]
     generated = []
     true_pdf = []
-    for x_s, y_s in zip(check_x_s, check_y_s):
-        conditions = torch.zeros((test_size, 2), device=device)
-        conditions[:, 0] = x_s
-        conditions[:, 1] = y_s
-        inverse_pass = model.inverse(test_size, conditions)[0].detach().cpu()
+    for x_s, y_s, a_s in zip(check_x_s, check_y_s, check_a_s):
+        prior_im = dataset.get_im(x_s, y_s, a_s, prior_s)
+        data_im = dataset.get_im(x_s, y_s, a_s, data_s)
+        conds = (x_s, y_s, a_s)
+        conditions, prior_noise, base_llk = \
+            get_conditioned_sample(prior_im, dataset.xedges, conds, test_size, prior_im=prior_im, device=device)
+        inverse_pass = model.inverse_z(prior_noise, conditions, base_llk)[0].detach().cpu()
         generated.append(np.array(inverse_pass))
-        true_pdf.append(dataset.get_im(x_s, y_s))
+        true_pdf.append(data_im)
 
     # --------------- visualisation
     fig, axs = plt.subplots(1, 3, figsize=(12, 5))
-    fig_title =  f'Cond RealNVP ADAM, layers: {model.layers}, hidden: {model.hidden}, T: {model.T}, seed {seed}\n' \
+    fig_title =  f'Cond RealNVP ADAM, layers: {model.layers}, hidden: {model.hidden}x2, T: {model.T}, seed {seed}\n' \
                  f'lr: {lr}, batches_n: {batches_number}, batch: {batch_size}, conds / batch: {conditions_per_batch}\n' \
-                 f'constrain: {model.transformers[0].constrain.__name__}, prior: N(0.5, 1), cond_prior: {model.cond_prior}, total conditions: {len(x_conditions)**2}'
+                 f'constrain: {model.transformers[0].constrain.__name__}, prior: data s0, total conditions: {total_conditions}'
     if loaded:
         fig_title += f'\n\n loaded model: {loaded}'
     fig.suptitle(fig_title)
@@ -173,7 +202,7 @@ if __name__ == '__main__':
     ax2_1.set_ylabel('loss')
 
     torch.save(model.state_dict(), f'{output}_model')
-    np.savetxt(f'{output}_conditions.txt', x_conditions)
+    np.savetxt(f'{output}_conditions.txt', dataset.x_conditions)
     np.savetxt(f'{output}_info.txt', fig_title)
     np.savetxt(f'{output}_loss.txt', loss_track)
     fig.savefig(f'{output}_inverse_pass.png')
