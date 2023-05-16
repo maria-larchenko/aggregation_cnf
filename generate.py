@@ -42,7 +42,5 @@ for x in (0.5, 0.6, 0.7, 0.8, 0.9):
                       f'fi \n'
             subprocess.run(cmd_str, shell=True)
 
-np.savetxt(f'./{dataset_name}/_x_conditions.txt', x_s)
-np.savetxt(f'./{dataset_name}/_a_conditions.txt', alpha)
 print("FINISHED")
 
