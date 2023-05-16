@@ -16,6 +16,7 @@ def direct_mc(im, xedges, sample_size=1024, prior_im=None):
     base_llk, prior_log_pdf = None, None
     if prior_im is not None:
         base_llk = np.zeros(sample_size)
+        prior_im = np.where(prior_im == 0, 1e-32, prior_im)
         prior_log_pdf = np.log(prior_im / np.sum(prior_im))
     i = 0
     while i < sample_size:
@@ -103,14 +104,14 @@ if __name__ == '__main__':
     prior_s = 0
     data_s = 9
     output = f'./output_2d/{data_name}'
-    total_conditions = len(dataset.x_conditions) / 2
+    total_conditions = int(len(dataset.x_conditions) / 2)
 
     # --------------- hyperparams & visualization
-    batches_number = 10
-    conditions_per_batch = 10
+    batches_number = 100
+    conditions_per_batch = 20
     samples = 1024 * 2
     batch_size = conditions_per_batch * samples
-    lr = 1e-4
+    lr = 1e-6
     test_size = 3000
     ms = 1
     processes = 10
@@ -160,13 +161,16 @@ if __name__ == '__main__':
         loss.backward()
         optim.step()
         # scheduler.step()
+    torch.save(model.state_dict(), f'{output}_model')
 
     print("Inverse pass")
     check_x_s = [0.5, 0.5, 0.8]
     check_y_s = [0.1, 0.5, 0.5]
-    check_a_s = [18, 45, 60]
+    check_a_s = [18, 45, 63]
+    prior = []
     generated = []
-    true_pdf = []
+    true_pdf_data = []
+    true_pdf_prior = []
     for x_s, y_s, a_s in zip(check_x_s, check_y_s, check_a_s):
         prior_im = dataset.get_im(x_s, y_s, a_s, prior_s)
         data_im = dataset.get_im(x_s, y_s, a_s, data_s)
@@ -174,24 +178,36 @@ if __name__ == '__main__':
         conditions, prior_noise, base_llk = \
             get_conditioned_sample(prior_im, dataset.xedges, conds, test_size, prior_im=prior_im, device=device)
         inverse_pass = model.inverse_z(prior_noise, conditions, base_llk)[0].detach().cpu()
+        prior.append(np.array(prior_noise.detach().cpu()))
         generated.append(np.array(inverse_pass))
-        true_pdf.append(data_im)
+        true_pdf_data.append(data_im)
+        true_pdf_prior.append(prior_im)
 
     # --------------- visualisation
-    fig, axs = plt.subplots(1, 3, figsize=(12, 5))
+    fig, axs = plt.subplots(2, 3, figsize=(12, 5))
     fig_title =  f'Cond RealNVP ADAM, layers: {model.layers}, hidden: {model.hidden}x2, T: {model.T}, seed {seed}\n' \
                  f'lr: {lr}, batches_n: {batches_number}, batch: {batch_size}, conds / batch: {conditions_per_batch}\n' \
                  f'constrain: {model.transformers[0].constrain.__name__}, prior: data s0, total conditions: {total_conditions}'
     if loaded:
         fig_title += f'\n\n loaded model: {loaded}'
     fig.suptitle(fig_title)
-    for ax, sample, im, x_s, y_s in zip(axs, generated, true_pdf, check_x_s, check_y_s):
+    for ax, sample, im, x_s, y_s in zip(axs[0], prior, true_pdf_prior, check_x_s, check_y_s):
         ax.contourf(dataset.xedges, dataset.xedges, im, levels=256, cmap="gist_gray")
+        ax.plot(sample[:, 1], sample[:, 0], '.', ms=ms, c='tab:blue', alpha=0.8, label='prior')
         ax.plot((x_s,), (y_s,), 'x r', label='source')
+        ax.set_aspect('equal')
+        ax.axis('off')
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.legend()
+    for ax, sample, im, x_s, y_s in zip(axs[1], generated, true_pdf_data, check_x_s, check_y_s):
+        ax.contourf(dataset.xedges, dataset.xedges, im, levels=256, cmap="gist_gray")
         ax.plot(sample[:, 1], sample[:, 0], '.', ms=ms, c='tab:green', alpha=0.8, label='generated')
+        ax.plot((x_s,), (y_s,), 'x r', label='source')
         ax.set_aspect('equal')
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
+        ax.axis('off')
         ax.legend()
 
     fig2, ax2_1 = plt.subplots(1, 1, figsize=(5, 5))
@@ -201,10 +217,7 @@ if __name__ == '__main__':
     ax2_1.set_xlabel('epoch')
     ax2_1.set_ylabel('loss')
 
-    torch.save(model.state_dict(), f'{output}_model')
-    np.savetxt(f'{output}_conditions.txt', dataset.x_conditions)
-    np.savetxt(f'{output}_info.txt', fig_title)
-    np.savetxt(f'{output}_loss.txt', loss_track)
+    np.savetxt(f'{output}_loss_info.txt', loss_track, header=fig_title)
     fig.savefig(f'{output}_inverse_pass.png')
     fig2.savefig(f'{output}_loss.png')
     plt.show()
