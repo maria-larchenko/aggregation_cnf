@@ -1,6 +1,8 @@
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.distributions.multivariate_normal import MultivariateNormal
+from aggregation.Static import external_prior_llk
 
 seed = 2346  # np.random.randint(10_000)
 torch.manual_seed(seed)
@@ -17,15 +19,15 @@ class ConditionalAffineTransformer(nn.Module):
         self.scale_net = nn.Sequential(
             nn.Linear(input_dim + condition_dim, hidden),
             nn.LeakyReLU(),
-            nn.Linear(hidden, hidden),
-            nn.LeakyReLU(),
+            # nn.Linear(hidden, hidden),
+            # nn.LeakyReLU(),
             nn.Linear(hidden, input_dim),
         )
         self.translation_net = nn.Sequential(
             nn.Linear(input_dim + condition_dim, hidden),
             nn.LeakyReLU(),
-            nn.Linear(hidden, hidden),
-            nn.LeakyReLU(),
+            # nn.Linear(hidden, hidden),
+            # nn.LeakyReLU(),
             nn.Linear(hidden, input_dim),
         )
 
@@ -113,7 +115,7 @@ class ConditionalRealNVP(nn.Module):
             self.device = device
             self.to(device)
 
-    def cond_base_dist(self, cond):
+    def base_dist(self, cond):
         base_mu = torch.zeros(2, device=self.device)  # hardcoded for 2D
         base_cov = torch.eye(2, device=self.device)
         # if cond_prior_pdf:
@@ -124,23 +126,26 @@ class ConditionalRealNVP(nn.Module):
         base_dist = MultivariateNormal(base_mu, base_cov)
         return base_dist
 
-    def forward(self, x, cond, base_llk=None):
+    def forward(self, x, cond, base_llk_lst=None, xedges=None):
         log_determinant = 0
         for i in range(0, self.layers):
             alternate = self.alternate[i]
             transformer = self.transformers[i]
             x, scale, _ = transformer(x, cond, alternate)
             log_determinant += torch.log(scale).sum(1)
-        if base_llk is None:
+        if base_llk_lst is None:
             assert not self.external_prior
-            log_likelihood = self.cond_base_dist(cond).log_prob(x)  # log likelihood of sample under the base measure
+            log_likelihood = self.base_dist(cond).log_prob(x).mean()  # log likelihood of sample under the base measure
         else:
             assert self.external_prior
-            log_likelihood = base_llk
-        model_loss = - (log_determinant + log_likelihood).mean()
+            xx = x.detach().cpu().numpy()
+            prior_llk = external_prior_llk(xx, base_llk_lst, xedges)
+            log_likelihood = np.mean(prior_llk)
+        model_loss = - (log_determinant.mean() + log_likelihood)
         return x, model_loss
 
-    def forward_x(self, x, cond, base_llk=None):
+    def forward_x(self, x, cond, base_llk_lst=None, xedges=None):
+        """returns log pdf for every (x, cond) input, for visualization"""
         log_determinant = 0
         for i in range(0, self.layers):
             alternate = self.alternate[i]
@@ -150,43 +155,49 @@ class ConditionalRealNVP(nn.Module):
         nans = torch.isnan(x)
         infs = torch.isinf(x)
         if torch.any(nans) and self.replace_nan:
-            assert not self.external_prior
             print(f"model.forward_x:  NAN -> INF for {torch.count_nonzero(infs)} points")
             inf = torch.tensor(torch.inf, dtype=torch.float32)
             x = torch.where(torch.isnan(x), inf, x)
-        if base_llk is None:
-            log_likelihood = self.cond_base_dist(cond).log_prob(x)  # log likelihood of sample under the base measure
+        if base_llk_lst is None:
+            assert not self.external_prior
+            log_likelihood = self.base_dist(cond).log_prob(x)  # log likelihood of sample under the base measure
         else:
             assert self.external_prior
-            log_likelihood = base_llk
+            xx = x.detach().cpu().numpy()
+            log_likelihood = external_prior_llk(xx, base_llk_lst, xedges)
+            log_likelihood = torch.tensor(log_likelihood, dtype=torch.float32, device=self.device)
         log_pdf = log_determinant + log_likelihood
         return x, log_pdf, nans, infs
 
-    def inverse(self, batch_size, cond):
+    def inverse(self, sample_size, cond, compute_pdf=False):
         assert not self.external_prior
-        base_dist = self.cond_base_dist(cond)
-        z = base_dist.rsample((batch_size,))
-        log_likelihood = base_dist.log_prob(z)  # log likelihood of noise under the base measure
-        self.noise = z
+        base_dist = self.base_dist(cond)
+        z = base_dist.rsample((sample_size,))
+        log_likelihood = base_dist.log_prob(z) if compute_pdf else 0
+        self.noise = z.detach().cpu()
         log_determinant = 0
         for i in reversed(range(0, self.layers)):
             alternate = self.alternate[i]
             transformer = self.transformers[i]
             z, scale, _ = transformer.inverse(z, cond, alternate)
-            log_determinant += torch.log(scale).sum(1)
-        model_loss = - (log_determinant - log_likelihood).mean()
+            log_determinant += torch.log(scale).sum(1) if compute_pdf else 0
+        model_loss = - (log_determinant - log_likelihood).mean() if compute_pdf else 0
         return z, model_loss
 
-    def inverse_z(self, z, cond, base_llk):
-        assert self.external_prior
-        log_likelihood = base_llk
-        self.noise = z
+    def inverse_z(self, z, cond, base_llk_lst=None, xedges=None, compute_pdf=False):
+        log_likelihood = 0
         log_determinant = 0
+        self.noise = z
+        if compute_pdf and self.external_prior:
+            zz = z.detach().cpu().numpy()
+            log_likelihood = np.sum(external_prior_llk(zz, base_llk_lst, xedges))
+        elif compute_pdf:
+            log_likelihood = self.base_dist(cond).log_prob(z)
         for i in reversed(range(0, self.layers)):
             alternate = self.alternate[i]
             transformer = self.transformers[i]
             z, scale, _ = transformer.inverse(z, cond, alternate)
-            log_determinant += torch.log(scale).sum(1)
+            log_determinant += torch.log(scale).sum(1) if compute_pdf else 0
         log_pdf = log_determinant - log_likelihood
         return z, log_pdf
 
