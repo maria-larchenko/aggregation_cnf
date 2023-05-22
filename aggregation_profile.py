@@ -3,7 +3,7 @@ import imageio.plugins.pyav
 import numpy as np
 import matplotlib.pyplot as plt
 
-from aggregation.Dataset import read_image
+from aggregation.Static import read_image
 
 x_s, y_s = 0.5, 0.5
 S = 10

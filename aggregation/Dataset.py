@@ -1,16 +1,6 @@
 import numpy as np
-import imageio.v3 as iio
-import imageio.plugins.pyav
+from aggregation.Static import read_image
 
-
-def read_image(url):
-    im = iio.imread(url)
-    im = im[0]
-    im = im[:, :, 0]
-    # im = np.mean(im[0], axis=2)
-    # integral = im.sum()
-    # im = im / integral
-    return im
 
 
 class DatasetImg:
