@@ -12,23 +12,27 @@ D = "e0"
 S = "10"
 coag = "1"
 
-alpha = ["0", ]
-x_s = ["0.05", ]  # [str(np.around(i * 0.1, decimals=3)) for i in range(1, 10)]
-y_s = ["0.5", ]  # [str(np.around(i * 0.1, decimals=3)) for i in range(1, 10)]
-I = ["1", "10", "50", "100"]
-V = ["0.5", "1.0", "10.0"]
-
+alpha = [0, ]   # [0, 9, 18, 27, 36, 45, 54, 63, 72, 90] #[(9 * i) for i in range(0, 11)]
+x_s = [0.05, ]  # [i * 0.1 for i in range(1, 10)]
+y_s = [0.5, ]  # [i * 0.1 for i in range(1, 10)]
+I = [1, 10, 50, 100]
+V = [0.5, 1.0, 10.0]
 
 dataset_name = f"dataset_S{S}_shape"
-
 info_str = f"coag={coag} S={S} D={D} angle=0 x_s=(.05, .5) h=6 10x10km"
-subprocess.run(f"echo {info_str} > __info.txt", shell=True)
+
+
+subprocess.run(f'echo "{info_str}" >> info.txt', shell=True)
 for x in x_s:
     for y in y_s:
         for a in alpha:
             for v in V:
                 for i in I:
-
+                    x = str(np.around(x, decimals=3))
+                    y = str(np.around(y, decimals=3))
+                    a = str(int(a))
+                    v = str(np.around(x, decimals=3))
+                    i = str(int(i))
                     mv_str = ""
                     for s in range(0, int(S)):
                         s = str(s)

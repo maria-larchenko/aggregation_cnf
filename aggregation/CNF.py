@@ -19,15 +19,15 @@ class ConditionalAffineTransformer(nn.Module):
         self.scale_net = nn.Sequential(
             nn.Linear(input_dim + condition_dim, hidden),
             nn.LeakyReLU(),
-            # nn.Linear(hidden, hidden),
-            # nn.LeakyReLU(),
+            nn.Linear(hidden, hidden),
+            nn.LeakyReLU(),
             nn.Linear(hidden, input_dim),
         )
         self.translation_net = nn.Sequential(
             nn.Linear(input_dim + condition_dim, hidden),
             nn.LeakyReLU(),
-            # nn.Linear(hidden, hidden),
-            # nn.LeakyReLU(),
+            nn.Linear(hidden, hidden),
+            nn.LeakyReLU(),
             nn.Linear(hidden, input_dim),
         )
 
@@ -88,14 +88,14 @@ class ConditionalAffineTransformer(nn.Module):
 
 
 class ConditionalRealNVP(nn.Module):
-    def __init__(self, in_dim, cond_dim, layers=4, hidden=512, T=1, external_prior=True, device=None, replace_nan=False):
+    def __init__(self, cond_dim, layers=4, hidden=512, T=1, external_prior=False, device=None, replace_nan=False):
         super().__init__()
         self.layers = layers
         self.hidden = hidden
-        self.input_dim = in_dim
+        self.input_dim = 1  # hardcoded for 2D
+        self.split = 1  # hardcoded for 2D
         self.condition_dim = cond_dim
         self.external_prior = external_prior
-        self.split = 1  # hardcoded for in, out = 1, 1
         self.T=T
         ## masks zeroing (x, y)-input for 2-input NNs seemingly lead to vanishing grads.
         ## replacing 2-input 2-output NNs with 1-input/output solved the problem.
@@ -106,7 +106,7 @@ class ConditionalRealNVP(nn.Module):
         ]
         # to register submodules params ModuleList is required instead of list
         self.transformers = nn.ModuleList([
-            ConditionalAffineTransformer(in_dim, cond_dim, self.split, hidden, T=T)
+            ConditionalAffineTransformer(self.input_dim, cond_dim, self.split, hidden, T=T)
             for _ in range(0, layers)
         ])
         self.replace_nan = replace_nan
@@ -114,17 +114,16 @@ class ConditionalRealNVP(nn.Module):
         if device is not None:
             self.device = device
             self.to(device)
+            base_mu = torch.ones(2, device=device) # hardcoded for 2D
+            base_cov = torch.eye(2, device=device)
+        else:
+            base_mu = torch.zeros(2)
+            base_cov = torch.eye(2)
+        self.base_dist = MultivariateNormal(base_mu, base_cov)
 
-    def base_dist(self, cond):
-        base_mu = torch.zeros(2, device=self.device)  # hardcoded for 2D
-        base_cov = torch.eye(2, device=self.device)
-        # if cond_prior_pdf:
-        #     mean = self.prior_mean_net(cond)[0]
-        #     scale = torch.exp(self.prior_scale_net(cond))[0]
-        #     base_mu = base_mu + mean
-        #     base_cov = base_cov * scale
-        base_dist = MultivariateNormal(base_mu, base_cov)
-        return base_dist
+
+    def get_base_dist(self, cond):
+        return self.base_dist
 
     def forward(self, x, cond, base_llk_lst=None, xedges=None):
         log_determinant = 0
@@ -135,7 +134,7 @@ class ConditionalRealNVP(nn.Module):
             log_determinant += torch.log(scale).sum(1)
         if base_llk_lst is None:
             assert not self.external_prior
-            log_likelihood = self.base_dist(cond).log_prob(x).mean()  # log likelihood of sample under the base measure
+            log_likelihood = self.base_dist.log_prob(x).mean()  # log likelihood of sample under the base measure
         else:
             assert self.external_prior
             xx = x.detach().cpu().numpy()
@@ -156,11 +155,11 @@ class ConditionalRealNVP(nn.Module):
         infs = torch.isinf(x)
         if torch.any(nans) and self.replace_nan:
             print(f"model.forward_x:  NAN -> INF for {torch.count_nonzero(infs)} points")
-            inf = torch.tensor(torch.inf, dtype=torch.float32)
+            inf = torch.tensor(torch.inf, dtype=torch.float32, device=self.device)
             x = torch.where(torch.isnan(x), inf, x)
         if base_llk_lst is None:
             assert not self.external_prior
-            log_likelihood = self.base_dist(cond).log_prob(x)  # log likelihood of sample under the base measure
+            log_likelihood = self.base_dist.log_prob(x)  # log likelihood of sample under the base measure
         else:
             assert self.external_prior
             xx = x.detach().cpu().numpy()
@@ -171,9 +170,8 @@ class ConditionalRealNVP(nn.Module):
 
     def inverse(self, sample_size, cond, compute_pdf=False):
         assert not self.external_prior
-        base_dist = self.base_dist(cond)
-        z = base_dist.rsample((sample_size,))
-        log_likelihood = base_dist.log_prob(z) if compute_pdf else 0
+        z = self.base_dist.rsample((sample_size,))
+        log_likelihood = self.base_dist.log_prob(z) if compute_pdf else 0
         self.noise = z.detach().cpu()
         log_determinant = 0
         for i in reversed(range(0, self.layers)):
@@ -192,7 +190,7 @@ class ConditionalRealNVP(nn.Module):
             zz = z.detach().cpu().numpy()
             log_likelihood = np.sum(external_prior_llk(zz, base_llk_lst, xedges))
         elif compute_pdf:
-            log_likelihood = self.base_dist(cond).log_prob(z)
+            log_likelihood = self.base_dist.log_prob(z)
         for i in reversed(range(0, self.layers)):
             alternate = self.alternate[i]
             transformer = self.transformers[i]
