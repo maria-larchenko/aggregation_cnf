@@ -9,6 +9,7 @@ from aggregation.Static import expand_conditions
 
 
 contour_levels = 2
+size = 5
 
 data_name = "dataset_S10_shape"
 data_url = "./datasets/dataset_S10_shape"
@@ -23,9 +24,9 @@ velocity = [0.5, 1.0, 10.0]
 
 dataset = DatasetImg(data_url, get_cond_id, data_im_name, name=data_name)
 xedges = dataset.xedges
-check_v = np.random.choice(velocity, size=3)      # dataset_S10_shape
-check_I = np.random.choice(intensity, size=3)
-check_s = np.random.choice(p_size, size=3)
+check_v = np.random.choice(velocity, size=size)      # dataset_S10_shape
+check_I = np.random.choice(intensity, size=size)
+check_s = np.random.choice(p_size, size=size)
 
 output = f'./analysis/XsModel'
 loaded = "output_2d/shape/4_II/7 20x500/dataset_S10_shape_model"
@@ -78,7 +79,7 @@ with torch.no_grad():
 print(f"mean relative error: {np.mean(errors)}")
 
 # --------------- visualisation
-fig, axs = plt.subplots(2, 3, figsize=(12, 5))
+fig, axs = plt.subplots(2, size, figsize=(12, 5))
 fig.suptitle(f'ACCURACY TEST: {np.around(np.mean(errors), decimals=3)}\n'
              f'Cond RealNVP ADAM, layers: {model.layers}x2, hidden: {model.hidden}, T: {model.T} \n'
              f'{loaded}')
