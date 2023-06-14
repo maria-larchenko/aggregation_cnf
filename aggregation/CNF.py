@@ -121,9 +121,10 @@ class ConditionalRealNVP(nn.Module):
             base_cov = torch.eye(2)
         self.base_dist = MultivariateNormal(base_mu, base_cov)
 
-
-    def get_base_dist(self, cond):
-        return self.base_dist
+    def set_temperature(self, T):
+        for transformer in self.transformers:
+            transformer.T = T
+        self.T = T
 
     def forward(self, x, cond, base_llk_lst=None, xedges=None):
         log_determinant = 0
