@@ -16,7 +16,7 @@ x_s = [0.05, ]
 y_s = [0.5, ]
 size = [i for i in range(0, int(S))]
 I = [1, 10, 50, 100]
-V = [0.5, 1.0, 10.0]
+V = [0.5] #, 1.0, 10.0]
 
 cond_lst = []
 for x in x_s:
@@ -26,7 +26,8 @@ for x in x_s:
                 for i in I:
                     for s in size:
                         # cond_lst.append((x, y, a, s))     # dataset_S{S}_alpha
-                        cond_lst.append((v, i, s))     # dataset_S{S}_shape
+                        # cond_lst.append((v, i, s))     # dataset_S{S}_shape
+                        cond_lst.append((i, s))     # dataset_S{S}_shape_IS
 
-np.savetxt(f'./datasets/{dataset_name}/__conditions.txt', cond_lst, header="v, I, size")
+np.savetxt(f'./datasets/{dataset_name}/__conditions_IS.txt', cond_lst, header="Intensity, Size")
 print("FINISHED")
