@@ -36,15 +36,15 @@ class XsModel:
         final_sample = (rot @ inverse_pass).T + source.T
         return final_sample
 
-source_model = XsModel()
-density = source_model.density(x_s=0.0, y_s=0.5, alpha=10, v=10.0, I=10.0, s=3)
-plt.plot(density[:, 1], density[:, 0], '.', ms=2, c='green', alpha=1.0, label='generated')
-plt.gca().set_aspect('equal')
-plt.gca().set_xlim(-.01, 1.01)
-plt.gca().set_ylim(-.01, 1.01)
-plt.show()
-
-exit()
+# source_model = XsModel()
+# density = source_model.density(x_s=0.0, y_s=0.5, alpha=10, v=10.0, I=10.0, s=3)
+# plt.plot(density[:, 1], density[:, 0], '.', ms=2, c='green', alpha=1.0, label='generated')
+# plt.gca().set_aspect('equal')
+# plt.gca().set_xlim(-.01, 1.01)
+# plt.gca().set_ylim(-.01, 1.01)
+# plt.show()
+#
+# exit()
 
 contour_levels = 5
 size = 5
@@ -67,9 +67,9 @@ check_I = np.random.choice(intensity, size=size)
 check_s = np.random.choice(p_size, size=size)
 
 output = f'./analysis/XsModel'
-loaded = "output_2d/shape/4_II/10 20x1000/dataset_S10_shape_model"
+loaded = "output_2d/shape/4_II/12 20x4000/dataset_S10_shape_model"
 device = torch.device('cuda')
-model = ConditionalRealNVP(cond_dim=3, layers=4, hidden=2024, T=1, device=device, replace_nan=True)
+model = ConditionalRealNVP(cond_dim=3, layers=6, hidden=512, T=1, device=device, replace_nan=True)
 model.load_state_dict(torch.load(loaded, map_location=device))
 
 true_pdfs = []

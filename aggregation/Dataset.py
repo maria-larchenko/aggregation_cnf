@@ -9,7 +9,10 @@ class DatasetImg:
         self.data_loc = data_loc
         self.get_cond_id = get_cond_id
         self.get_im_name = get_im_name  # is a function of cond_id
-        self.x_conditions = np.loadtxt(f"{data_loc}/__conditions.txt", skiprows=1) if conditions is None else conditions
+        if conditions is not None:
+            self.x_conditions = np.loadtxt(f"{data_loc}/{conditions}", skiprows=1)
+        else:
+            self.x_conditions = np.loadtxt(f"{data_loc}/__conditions.txt", skiprows=1)
         self.name = name if name is not None else data_loc
         self.dataset, self.im_size = self.read_dataset()
         self.xedges = np.arange(0, self.im_size) / self.im_size
