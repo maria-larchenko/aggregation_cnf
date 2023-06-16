@@ -10,41 +10,57 @@ from aggregation.Static import expand_conditions
 from numpy import cos, sin, pi
 
 
-class XsModel:
+class SourceModel:
 
-    def __init__(self, sample_size=500):
-        loaded = "output_2d/shape/4_II/10 20x1000/dataset_S10_shape_model"
+    def __init__(self, loaded, cond_dim, layers, hidden, T):
         device = torch.device('cpu')
         self.device = device
-        self.sample_size = sample_size
-        self.model = ConditionalRealNVP(cond_dim=3, layers=4, hidden=2024, T=1, device=device, replace_nan=True)
+        self.model = ConditionalRealNVP(cond_dim=cond_dim, layers=layers, hidden=hidden, T=T, device=device, replace_nan=True)
         self.model.load_state_dict(torch.load(loaded, map_location=device))
+        self.low = 0
+        self.high = 1
 
-    def density(self, x_s, y_s, alpha, v, I, s):
-        conds = (v, I, s)
-        conditions = expand_conditions(conds, self.sample_size, self.device)
-        inverse_pass = self.model.inverse(self.sample_size, conditions)[0].detach().cpu()
-        inverse_pass = np.array(inverse_pass)
+    def crop(self, sample):
+        sample = np.where(sample < 1, sample, np.nan)
+        sample = np.where(0 < sample, sample, np.nan)
+        return sample
 
+    def get_sample(self, x_s, y_s, alpha, v, I, s, sample_size=3000):
+        # -------- shape_IS
+        conds = (I, s)
+        conditions = expand_conditions(conds, sample_size, self.device)
+        sample, _ = self.model.inverse(sample_size, conditions)
+        sample = np.array(sample.detach().cpu())
+        # sample = self.crop(sample)
+        sample = sample - np.array([0.5, 0])
+        # -------- rotate
         a = - alpha * pi / 180
         rot = np.array([[cos(a), -sin(a)],
                           [sin(a), cos(a)]])
-        print(rot.shape)
-        print(inverse_pass.shape)
-        inverse_pass = inverse_pass.T
-        source = np.array([y_s-0.5, x_s])
-        final_sample = (rot @ inverse_pass).T + source.T
-        return final_sample
+        sample = sample.T
+        source = np.array([y_s, x_s])
+        sample = (rot @ sample).T + source.T
+        # -------- crop
+        sample = self.crop(sample)
+        return sample
 
-# source_model = XsModel()
-# density = source_model.density(x_s=0.0, y_s=0.5, alpha=10, v=10.0, I=10.0, s=3)
-# plt.plot(density[:, 1], density[:, 0], '.', ms=2, c='green', alpha=1.0, label='generated')
-# plt.gca().set_aspect('equal')
-# plt.gca().set_xlim(-.01, 1.01)
-# plt.gca().set_ylim(-.01, 1.01)
-# plt.show()
-#
-# exit()
+
+loaded = "output_2d/shape_IS/6_II/12/dataset_S10_shape_model"
+source_model = SourceModel(loaded, cond_dim=2, layers=6, hidden=512, T=1.27)
+x_s, y_s = 0.1, 0.2
+alpha = 20
+v = 0.5
+I = 50.0
+s = 9
+density = source_model.get_sample(x_s=x_s, y_s=y_s, alpha=alpha, v=1.0, I=I, s=s, sample_size=3000)
+plt.plot(density[:, 1], density[:, 0], '.', ms=2, c='green', alpha=1.0, label='generated')
+plt.gca().set_title(f'size: {s}, I: {I}')
+plt.gca().set_aspect('equal')
+plt.gca().set_xlim(-.01, 1.01)
+plt.gca().set_ylim(-.01, 1.01)
+plt.gca().scatter(x_s, y_s, c='r')
+plt.show()
+exit()
 
 contour_levels = 5
 size = 5

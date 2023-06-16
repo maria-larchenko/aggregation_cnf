@@ -93,7 +93,7 @@ def train_model(rep, pool):
                     l2reg += (p ** 2).sum()
         loss = model_loss + l1 * l1reg + l2 * l2reg
         loss_track.append(loss.detach().cpu())
-        t.set_description(f"model_loss: {model_loss.detach().cpu()} "
+        t.set_description(f"{rep}/{reps}|| model_loss: {model_loss.detach().cpu()} "
                           f"| l1: {l1 * l1reg} l2: {l2 * l2reg} T: {model.T} | loss: {loss.detach().cpu()}")
         t.refresh()
         loss.backward()
@@ -175,20 +175,20 @@ if __name__ == '__main__':
     output = f'./output_2d/{data_name}'
 
     # --------------- hyperparams & visualization
-    batches_number = 1000
-    conditions_per_batch = 5
-    samples = 512 * 2
+    batches_number = 10000
+    conditions_per_batch = 6
+    samples = 512 * 3
     batch_size = conditions_per_batch * samples
-    lr = 1e-6
-    l1 = 5e-5
-    l2 = 1e-3
-    parallel = 5
-    reps = 40
-    temperatures = np.linspace(start=1.35, stop=1.35, num=reps)
+    lr = 5e-8
+    l1 = 1e-4
+    l2 = 5e-3
+    parallel = 3
+    reps = 20
+    temperatures = np.linspace(start=1.27, stop=1.27, num=reps)
 
     # --------------- model load
     loaded = False
-    loaded = "output_2d/shape_IS/6_II/8/dataset_S10_shape_model"
+    loaded = "output_2d/shape_IS/6_II/12/dataset_S10_shape_model"
     print(f"CNF with {parallel} processes")
     print(f"SEED: {seed}")
     torch.manual_seed(seed)
