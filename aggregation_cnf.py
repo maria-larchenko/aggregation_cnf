@@ -12,32 +12,17 @@ from aggregation.Static import im_to_pdf, flatten_list, direct_mc, expand_condit
 
 
 # the func depends on a dataset and has to be changed wrt to it
-def get_condition_set(dataset):
-    # if dataset.name == "dataset_S10_alpha":
-    #     x_s, y_s = np.random.choice(x_sources, size=2)
-    #     alpha = np.random.choice(alphas)
-    #     cond_set = (x_s, y_s, alpha)
-    if dataset.name == "dataset_S10_shape":
-        # v = np.random.choice(velocity)
-        I = np.random.choice(intensity)
-        s = np.random.choice(p_size)
-        # cond_set = (v, I, s)
-        cond_set = (I, s)
-    return cond_set
 
 def prepare_batch_args(process_num, sample_size, dataset, ext_prior, device):
     pool_args = []
     im, prior_im, cond_lst = None, None, None
     for _ in range(process_num):
+        cond_lst, im = dataset.get_random_im()
         # if dataset.name == "dataset_S10_alpha":
-        #     cond_set = get_condition_set()
-        #     im = dataset.get_im(*(cond_set + (data_s)))
         #     prior_im = dataset.get_im(*(cond_set + (prior_s))) if ext_prior else None
-        if dataset.name == "dataset_S10_shape":
-            cond_set = get_condition_set(dataset)
-            im = dataset.get_im(*cond_set)
-        pool_args.append((im, dataset.xedges, cond_set, sample_size, prior_im, device))
+        pool_args.append((im, dataset.xedges, cond_lst, sample_size, prior_im, device))
     return pool_args
+
 
 def get_conditioned_sample(im, xedges, cond_lst, sample_size, prior_im=None, device=None):
     sample = direct_mc(im, xedges, sample_size)
@@ -50,7 +35,8 @@ def get_conditioned_sample(im, xedges, cond_lst, sample_size, prior_im=None, dev
         prior_llk = [prior_log_pdf] * sample_size
     return conditions, sample, prior_llk
 
-def get_conditioned_batch(pool, dataset, process_num, sample_size, conds_per_batch=1, ext_prior=False, device=None,):
+
+def get_conditioned_batch(pool, dataset, process_num, sample_size, conds_per_batch=1, ext_prior=False, device=None, ):
     conds, batch, base_llk_lst = [], [], []
     runs = int(np.floor(conds_per_batch / process_num))
     residual = conds_per_batch - process_num * runs
@@ -72,6 +58,7 @@ def get_conditioned_batch(pool, dataset, process_num, sample_size, conds_per_bat
     batch = torch.cat(batch, dim=0)
     base_llk_lst = flatten_list(base_llk_lst) if ext_prior else None
     return conds, batch, base_llk_lst
+
 
 def train_model(rep, pool):
     loss_track = []
@@ -101,37 +88,39 @@ def train_model(rep, pool):
         # scheduler.step()
     return loss_track
 
+
 def get_loss_fig(loss_track):
     fig, ax = plt.subplots(1, 1, figsize=(5, 5))
     ax.set_title('loss')
     ax.plot(loss_track)
     # ax.set_yscale('log')
-    ax.set_xlabel('epoch')
+    ax.set_xlabel('batches')
     ax.set_ylabel('loss')
     fig.tight_layout()
     return fig
 
+
 def get_header(model, dataset):
     header = f'Cond RealNVP ADAM, layers: {model.layers}, hidden: {model.hidden}x2, T: {model.T}, seed {seed}\n' \
-                f'lr: {lr}, l1: {l1}, l2: {l2}, batches_n: {batches_number}, reps: {reps}, samples: {samples}, conds / batch: {conditions_per_batch}\n' \
-                f'dataset: {dataset.name}, total conditions: {total_conditions} \n'
-                # f'constrain: {model.transformers[0].constrain.__name__}, '
+             f'lr: {lr}, l1: {l1}, l2: {l2}, batches_n: {batches_number}, reps: {reps}, samples: {samples}, conds / batch: {conditions_per_batch}\n' \
+             f'dataset: {dataset.name}, total conditions: {total_conditions} \n'
+    # f'constrain: {model.transformers[0].constrain.__name__}, '
     if loaded:
         header += f' --- loaded model: {loaded}'
     return header
+
 
 def get_inverse_fig(check_num, check_size, model, dataset, title):
     fig, axs = plt.subplots(1, check_num, figsize=(12, 5))
     fig.suptitle(title)
     for ax in axs:
-        cond_set = get_condition_set(dataset)
-        data_im = dataset.get_im(*cond_set)
+        cond_lst, data_im = dataset.get_random_im()
         # conditions, data_sample, _ = get_conditioned_sample(data_im, dataset.xedges, cond_set, check_size, device=device)
-        conditions = expand_conditions(cond_set, check_size, device)
+        conditions = expand_conditions(cond_lst, check_size, device)
         inverse_pass = model.inverse(check_size, conditions)[0].detach().cpu()
         ax.contourf(dataset.xedges, dataset.xedges, data_im, levels=256, cmap="gist_gray")
         ax.plot(inverse_pass[:, 1], inverse_pass[:, 0], '.', ms=1, c='tab:green', alpha=0.8, label='inverse_pass')
-        # ax.plot(data_sample.cpu()[:, 1], data_sample.cpu()[:, 0], '.', ms=1, c='tab:blue', alpha=0.8, label='true_sample')
+        # ax.plot(data_sample.cpu()[:, 1], data_sample.cpu()[:, 0], '.', ms=1, c='tab:blue', alpha=0.10, label='true_sample')
         ax.set_aspect('equal')
         # ax.set_xlim(0, 1)
         # ax.set_ylim(0, 1)
@@ -149,6 +138,7 @@ if __name__ == '__main__':
     # data_url = "./datasets/dataset_S10_alpha"
     # get_cond_id = lambda x_s, y_s, alpha, n: f"x={x_s}_y={y_s}_angle={int(alpha)}  {int(n)}"
     # data_im_name = lambda cond_id: f"{cond_id}_res_100.ppm"
+    # cond_dim = 3
     #
     # external_prior = True
     # x_sources = [(np.around(i * 0.1, decimals=3)) for i in range(1, 10)]
@@ -157,38 +147,41 @@ if __name__ == '__main__':
     # data_s = 9
 
     # # --------------- dataset_S10_shape
-    data_name = "dataset_S10_shape"
-    data_url = "./datasets/dataset_S10_shape"
-    x_conditions ="__conditions_IS.txt"
-    cond_dim = 2
+    # data_name = "dataset_S10_shape"
+    # data_url = "./datasets/dataset_S10_shape"
     # get_cond_id = lambda v, I, s: f"v={v} I={int(I)} {int(s)}"
+    # get_im_name = lambda cond_id: f"{cond_id}_res_100.ppm"
+    # cond_dim = 3
+
+    # # --------------- dataset_S10_shape_IS
+    data_name = "dataset_S10_shape_IS"
+    data_url = "./datasets/dataset_S10_shape"
+    x_conditions = "__conditions_IS.txt"
     get_cond_id = lambda I, s: f"v=0.5 I={int(I)} {int(s)}"
-    data_im_name = lambda cond_id: f"{cond_id}_res_100.ppm"
+    get_im_name = lambda cond_id: f"{cond_id}_res_100.ppm"
+    cond_dim = 2
 
     external_prior = False
-    p_size = [s for s in range(0, 10)]
-    intensity = [1, 10, 50, 100]
-    # velocity = [0.5, 1.0, 10.0]
 
-    dataset = DatasetImg(data_url, get_cond_id, data_im_name, name=data_name, conditions=x_conditions)
-    total_conditions = int(len(dataset.x_conditions))
+    dataset = DatasetImg(data_url, get_cond_id, get_im_name, name=data_name, conditions=x_conditions)
+    total_conditions = int(len(dataset.conditions))
     output = f'./output_2d/{data_name}'
 
-    # --------------- hyperparams & visualization
-    batches_number = 10000
+    # --------------- hyperparams
+    batches_number = 50
     conditions_per_batch = 6
     samples = 512 * 3
     batch_size = conditions_per_batch * samples
-    lr = 5e-8
+    lr = 5e-6
     l1 = 1e-4
     l2 = 5e-3
-    parallel = 3
-    reps = 20
-    temperatures = np.linspace(start=1.27, stop=1.27, num=reps)
+    parallel = 6
+    reps = 30
+    temperatures = np.linspace(start=3.5, stop=3.5, num=reps)
 
     # --------------- model load
-    loaded = False
-    loaded = "output_2d/shape_IS/6_II/12/dataset_S10_shape_model"
+    # loaded = False
+    loaded = "output_2d/shape_IS/10/6/dataset_S10_shape_IS_model"
     print(f"CNF with {parallel} processes")
     print(f"SEED: {seed}")
     torch.manual_seed(seed)
@@ -204,7 +197,7 @@ if __name__ == '__main__':
         device = torch.device('cpu')
         device_name = 'cpu'
     # device = torch.device('cpu')
-    model = ConditionalRealNVP(cond_dim=cond_dim, layers=6, hidden=512, T=1, device=device)
+    model = ConditionalRealNVP(cond_dim=cond_dim, layers=10, hidden=512, device=device)
     optim = torch.optim.Adam(model.parameters(), lr=lr)
     # scheduler = torch.optim.lr_scheduler.ExponentialLR(optim, 0.999)
 
@@ -213,7 +206,7 @@ if __name__ == '__main__':
     if loaded:
         model.load_state_dict(torch.load(loaded, map_location=device))
     print(f"{get_header(model, dataset)}")
-    print(f"total samples: {batch_size*batches_number}, total conditions: {total_conditions}")
+    print(f"total samples: {batch_size * batches_number}, total conditions: {total_conditions}")
     sleep(0.01)
     loss_track = []
     with Pool(processes=parallel) as pool:
@@ -240,8 +233,3 @@ if __name__ == '__main__':
     fig_inv.savefig(f'{output}_inverse_pass.png', bbox_inches="tight")
     # plt.show()
     print("FINISHED")
-
-
-
-
-
