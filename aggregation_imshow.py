@@ -5,67 +5,15 @@ import torch
 import matplotlib.pyplot as plt
 from aggregation.CNF import ConditionalRealNVP2D
 from aggregation.Dataset import DatasetImg
+from aggregation.FFN import FFN
 from aggregation.Static import expand_conditions
 
-from numpy import cos, sin, pi
 
-
-class SourceModel:
-
-    def __init__(self, loaded, cond_dim, layers, hidden, T, low=0, high=1):
-        device = torch.device('cpu')
-        self.device = device
-        self.model = ConditionalRealNVP2D(cond_dim=cond_dim, layers=layers, hidden=hidden, T=T, device=device, replace_nan=True)
-        self.model.load_state_dict(torch.load(loaded, map_location=device))
-        self.low = low
-        self.high = high
-
-    def crop(self, sample):
-        sample = np.where(sample < self.high, sample, np.nan)
-        sample = np.where(self.low < sample, sample, np.nan)
-        return sample
-
-    def get_sample(self, x_s, y_s, alpha, v, I, s, sample_size=3000):
-        # -------- shape_IS
-        conds = (I, s)
-        conditions = expand_conditions(conds, sample_size, self.device)
-        sample, _ = self.model.inverse(sample_size, conditions)
-        sample = np.array(sample.detach().cpu())
-        # sample = self.crop(sample)
-        sample = sample - np.array([0.5, 0])
-        # -------- rotate
-        a = - alpha * pi / 180
-        rot = np.array([[cos(a), -sin(a)],
-                          [sin(a), cos(a)]])
-        sample = sample.T
-        source = np.array([y_s, x_s])
-        sample = (rot @ sample).T + source.T
-        # -------- crop
-        sample = self.crop(sample)
-        return sample
-
-# loaded = "output_2d/shape_IS/6_II/12/dataset_S10_shape_model"
-# source_model = SourceModel(loaded, cond_dim=2, layers=6, hidden=512, T=1.27)
-# x_s, y_s = 0.3, 0.3
-# alpha = 45
-# v = 0.5
-# I = 1.0
-# s = 5
-# density = source_model.get_sample(x_s=x_s, y_s=y_s, alpha=alpha, v=1.0, I=I, s=s, sample_size=3000)
-# plt.plot(density[:, 1], density[:, 0], '.', ms=2, c='green', alpha=1.0, label='generated')
-# plt.gca().set_title(f'size: {s}, I: {I}')
-# plt.gca().set_aspect('equal')
-# plt.gca().set_xlim(-.01, 1.01)
-# plt.gca().set_ylim(-.01, 1.01)
-# plt.gca().scatter(x_s, y_s, c='r')
-# plt.show()
-# exit()
-
-contour_levels = 2
+contour_levels = 5
 tests = 5
 cond_dim = 2
 device = torch.device('cuda')
-output = f'./analysis/XsModel'
+output = f'./analysis/imshow'
 
 # # ------------------ shape V I S10
 # data_name = "dataset_S10_shape"
@@ -114,24 +62,38 @@ output = f'./analysis/XsModel'
 data_name = "dataset_S500_shape"
 data_url = "./datasets/dataset_S500_shape"
 x_conditions ="__conditions_IS.txt"
-get_cond_id = lambda I, s: f"v=0.5 I={int(I)} {int(s)}"
-data_im_name = lambda cond_id: f"{cond_id}_res_1.ppm"
+get_im_id = lambda I, s: f"v=0.5 I={int(I)} {int(s)}"
+get_im_name = lambda cond_id: f"{cond_id}_res_1.ppm"
+get_concentration_name = lambda I, s: f"v=0.5 I={int(I)} concentration.txt"
+get_concentration_scale = lambda I, s: 1.0025 * I
 low = -0.5
 high = 0.5
 
 p_size = [s for s in range(0, 500)]
-intensity = [10, 50, 100]
+intensity = [10*i for i in range(1, 11)]
 velocity = [0.5, 1.0, 5.0]
 get_condition_set = lambda : (np.random.choice(intensity), np.random.choice(p_size))
 
-model.load_state_dict(torch.load(loaded, map_location=device))
+dataset = DatasetImg(data_url, get_im_id, get_im_name, get_concentration_name,
+                     name=data_name, conditions=x_conditions, low=low, high=high)
+xedges = dataset.xedges
+
+loaded_cnf = "output_2d/shape_IS500/32/dataset_S500_shape_model"
+model_cnf = ConditionalRealNVP2D(cond_dim=cond_dim, layers=32, hidden=32, T=1, device=device, replace_nan=True)
+model_cnf.load_state_dict(torch.load(loaded_cnf, map_location=device))
+
+loaded_ffn = "output_2d/shape_IS500/ffn/dataset_S500_shape_model_ffn"
+model_ffn = FFN(cond_dim, 1, hidden=32)
+model_ffn.load_state_dict(torch.load(loaded_ffn))
+
 true_pdfs = []
 trained_pdfs = []
-generated = []
+trained_scale = []
 nan_points = []
 inf_points = []
 errors = []
 check_conds = []
+
 with torch.no_grad():
     for _ in range(tests):
         conds = get_condition_set()
@@ -139,18 +101,19 @@ with torch.no_grad():
         im = dataset.get_im(*conds)
         true_pdfs.append(im)
 
+        ffn_scale = int(model_ffn(conds).detach()[0])
+        trained_scale.append(ffn_scale)
+
         x = torch.tensor(xedges, dtype=torch.float32, device=device)
         y = torch.tensor(xedges, dtype=torch.float32, device=device)
         xx = torch.cartesian_prod(x, y)
 
         conditions = expand_conditions(conds, len(xx), device)
-
-        test_size = 500
-        inverse_cond = expand_conditions(conds, test_size, device)
-        inverse_pass = model.inverse(test_size, inverse_cond)[0].detach().cpu()
-        generated.append(np.array(inverse_pass))
-
-        x, flatten_log_pdf, nans, infs = model.forward_x(xx, conditions)
+        # test_size = 500
+        # inverse_cond = expand_conditions(conds, test_size, device)
+        # inverse_pass = model.inverse(test_size, inverse_cond)[0].detach().cpu()
+        # generated.append(np.array(inverse_pass))
+        x, flatten_log_pdf, nans, infs = model_cnf.forward_x(xx, conditions)
         flatten_log_pdf = np.array(flatten_log_pdf.cpu())
         pdf = np.reshape(flatten_log_pdf, im.shape, order='C')
         pdf = np.where(pdf > -30., pdf, -30.)
@@ -165,42 +128,47 @@ with torch.no_grad():
         infinite = xx[inf_rows].cpu() if torch.any(inf_rows) else None
         inf_points.append(infinite)
 
-        err = np.mean(np.abs(im - pdf)/pdf)
-        errors.append(err)
+        # err = np.mean(np.abs(im - pdf)/pdf)
+        # errors.append(err)
 
 print(f"mean relative error: {np.mean(errors)}")
 
 # --------------- visualisation
-fig, axs = plt.subplots(2, tests, figsize=(12, 5))
-fig.suptitle(f'ACCURACY TEST: {np.around(np.mean(errors), decimals=3)}\n'
-             f'Cond RealNVP ADAM, layers: {model.layers}, hidden: {model.hidden}x{model.hidden_layers}, T: {model.T} \n'
-             f'{loaded}, in [{dataset.low}, {dataset.high}]')
+fig, axs = plt.subplots(3, tests, figsize=(12, 6))
+fig.suptitle(f'CondRealNVP: ADAM, layers: {model_cnf.layers}, hidden: {model_cnf.hidden}x{model_cnf.hidden_layers} {model_cnf.activation_str}, T: {model_cnf.T}\n'
+             f'FFN: ADAM, HuberLoss, exp, ReLU hidden: {model_ffn.hidden}x{model_ffn.layers} \n'
+             f'cnf: {loaded_cnf} \n'
+             f'ffn: {loaded_ffn} \n')
 
-axs[0, 0].set_ylabel("true p(x)", fontsize=12) #, rotation=0)
-for ax, im, sample, cond in zip(axs[0], true_pdfs, generated, check_conds):
+axs[0, 0].set_ylabel("im", fontsize=12) #, rotation=0)
+for ax, im, cond in zip(axs[0], true_pdfs, check_conds):
     ax.set_title(f"intensity={cond[0]}, size={cond[1]}")
+    ax.imshow(im, cmap='gray', vmin=0, vmax=255)
+
+axs[1, 0].set_ylabel("true p(x)", fontsize=12) #, rotation=0)
+for ax, im, cond in zip(axs[1], true_pdfs, check_conds):
     ax.contourf(xedges, xedges, im, levels=contour_levels, cmap="gist_gray")
-    # ax.plot(sample[:, 1], sample[:, 0], '.', ms=1, c='green', alpha=1.0, label='generated')
-    # ax.plot((x_s,), (y_s,), 'x r', label='source')
-    ax.set_aspect('equal')
+    ax.text(0.8 * low, 0.8 * high, f'max: {im.max()}', color='w')
     ax.set_xlim(xedges[0]-.01, xedges[-1]+.01)
     ax.set_ylim(xedges[0]-.01, xedges[-1]+.01)
-    ax.get_xaxis().set_ticks([])
-    ax.get_yaxis().set_ticks([])
 
-axs[1, 0].set_ylabel("model p(x)", fontsize=12, rotation=90)
-for ax, pdf, nan_p, inf_p, cond in zip(axs[1], trained_pdfs, nan_points, inf_points, check_conds):
+axs[2, 0].set_ylabel("model p(x)", fontsize=12, rotation=90)
+for ax, pdf, scale, nan_p, inf_p, cond in zip(axs[2], trained_pdfs, trained_scale, nan_points, inf_points, check_conds):
     ax.contourf(xedges, xedges, pdf, levels=contour_levels, cmap="gist_gray")
+    ax.text(0.8 * low, 0.8 * high, f'max: {scale}', color='w')
     if inf_p is not None:
         ax.plot(inf_p[:, 1], inf_p[:, 0], '.', ms=0.5, c='orange', alpha=1.0, label='produces inf')
     if nan_p is not None:
         ax.plot(nan_p[:, 1], nan_p[:, 0], '.', ms=0.5, c='red', alpha=1.0, label='produces nan')
-    ax.set_aspect('equal')
     ax.set_xlim(xedges[0] - .01, xedges[-1] + .01)
     ax.set_ylim(xedges[0] - .01, xedges[-1] + .01)
+# ax.legend(loc='upper left', bbox_to_anchor=(1.0, 1.025))
+
+for ax in np.reshape(axs, 3*tests):
+    ax.set_aspect('equal')
     ax.get_xaxis().set_ticks([])
     ax.get_yaxis().set_ticks([])
-# ax.legend(loc='upper left', bbox_to_anchor=(1.0, 1.025))
+
 
 
 fig.tight_layout()
