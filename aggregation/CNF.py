@@ -10,27 +10,49 @@ torch.manual_seed(seed)
 
 class ConditionalAffineTransformer(nn.Module):
 
-    def __init__(self, input_dim, condition_dim, split, hidden=512, T=1):
+    def __init__(self, input_dim, condition_dim, split, hidden=512, T=1, activation=nn.ReLU):
         super().__init__()
         self.split = split
         self.T = T
-        # self.constrain = torch.nn.functional.softplus
-        self.constrain = torch.exp
+        self.hidden = hidden
+        self.activation = activation
+        self.constrain = torch.exp  #torch.nn.functional.softplus
+        # # tried for 512 and 2024 hidden and 6-10 trans. layers, not ok
+        # self.scale_net = nn.Sequential(
+        #     nn.Linear(input_dim + condition_dim, hidden),
+        #     self.activation(),
+        #     nn.Linear(hidden, hidden),
+        #     self.activation(),
+        #     nn.Linear(hidden, input_dim),
+        # )
+        # self.translation_net = nn.Sequential(
+        #     nn.Linear(input_dim + condition_dim, hidden),
+        #     self.activation(),
+        #     nn.Linear(hidden, hidden),
+        #     self.activation(),
+        #     nn.Linear(hidden, input_dim),
+        # )
         self.scale_net = nn.Sequential(
-            nn.Linear(input_dim + condition_dim, hidden),
-            nn.LeakyReLU(),
+            nn.Linear(input_dim + condition_dim, hidden),   # for 32 layers and 20 hidden
+            self.activation(),
             nn.Linear(hidden, hidden),
-            nn.LeakyReLU(),
+            self.activation(),
+            nn.Linear(hidden, hidden),
+            self.activation(),
             nn.Linear(hidden, input_dim),
+            nn.Tanh(),
         )
         self.translation_net = nn.Sequential(
             nn.Linear(input_dim + condition_dim, hidden),
-            nn.LeakyReLU(),
+            self.activation(),
             nn.Linear(hidden, hidden),
-            nn.LeakyReLU(),
+            self.activation(),
+            nn.Linear(hidden, hidden),
+            self.activation(),
             nn.Linear(hidden, input_dim),
+            nn.Tanh(),
         )
-
+        self.layers = int(len(self.scale_net) / 2)
     # masks zeroing (x, y)-input for 2-input NNs seemingly lead to vanishing grads.
     # replacing 2-input 2-output NNs with 1-input/output solved the problem.
 
@@ -87,8 +109,8 @@ class ConditionalAffineTransformer(nn.Module):
         return x, scale, trans
 
 
-class ConditionalRealNVP(nn.Module):
-    def __init__(self, cond_dim, layers=4, hidden=512, T=1, external_prior=False, device=None, replace_nan=False):
+class ConditionalRealNVP2D(nn.Module):
+    def __init__(self, cond_dim, layers=4, hidden=512, activation=nn.ReLU, T=1, external_prior=False, device=None, replace_nan=False, ):
         super().__init__()
         self.layers = layers
         self.hidden = hidden
@@ -97,18 +119,14 @@ class ConditionalRealNVP(nn.Module):
         self.condition_dim = cond_dim
         self.external_prior = external_prior
         self.T=T
-        ## masks zeroing (x, y)-input for 2-input NNs seemingly lead to vanishing grads.
-        ## replacing 2-input 2-output NNs with 1-input/output solved the problem.
-        # self.masks = [
-        #     torch.Tensor([1, 0]) if i % 2 == 0 else torch.Tensor([0, 1]) for i in range(0, layers)
-        # ]
         self.alternate = [ i % 2 == 0 for i in range(0, layers)
         ]
         # to register submodules params ModuleList is required instead of list
         self.transformers = nn.ModuleList([
-            ConditionalAffineTransformer(self.input_dim, cond_dim, self.split, hidden, T=T)
+            ConditionalAffineTransformer(self.input_dim, cond_dim, self.split, hidden, T=T, activation=activation)
             for _ in range(0, layers)
         ])
+        self.hidden_layers = int( len(self.transformers[0].scale_net) / 2)
         self.replace_nan = replace_nan
         self.noise = None
         if device is not None:
@@ -120,6 +138,8 @@ class ConditionalRealNVP(nn.Module):
             base_mu = torch.zeros(2)
             base_cov = torch.eye(2)
         self.base_dist = MultivariateNormal(base_mu, base_cov)
+        i = str(activation).rfind('activation.') + len('activation.')
+        self.activation_str = str(activation)[i:-1]
 
     def set_temperature(self, T):
         for transformer in self.transformers:

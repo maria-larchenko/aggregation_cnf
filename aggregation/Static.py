@@ -12,12 +12,14 @@ np.random.seed(seed)
 
 @jit(nopython=True)
 def direct_mc(im, xedges, sample_size=1024):
+    low = xedges[0]
+    high = xedges[-1]
     scale = im.max()
     sample = np.zeros((sample_size, 2))
     i = 0
     while i < sample_size:
-        x, y = np.random.uniform(low=0, high=1, size=2)
-        if np.random.uniform() * scale <= im_to_pdf(im, xedges, x, y):
+        x, y = np.random.uniform(low=low, high=high, size=2)
+        if np.random.uniform() * scale <= im_to_pdf(im, xedges, x, y, low, high):
             sample[i, 0] = x
             sample[i, 1] = y
             i += 1
@@ -27,12 +29,14 @@ def direct_mc(im, xedges, sample_size=1024):
 # @jit(nopython=True, parallel=True)
 def external_prior_llk(x, base_llk_lst, xedges):
     """assuming x and base_llk as list with ref to 2D ndarrays"""
+    low = xedges[0]
+    high = xedges[-1]
     n = len(base_llk_lst)
     p = np.zeros(n)
     for i in prange(n):
         llk = base_llk_lst[i]
         x_i = x[i]
-        p[i] = im_to_pdf(llk, xedges, x_i[0], x_i[1])
+        p[i] = im_to_pdf(llk, xedges, x_i[0], x_i[1], low, high)
     return p
 
 def flatten_list(lst):
@@ -45,6 +49,7 @@ def expand_conditions(cond_lst, length, device):
     return conditions
 
 @jit(nopython=True)
+# image im is "centered" around 0, it is done with xedges
 def im_to_pdf(im, xedges, x, y, low=0, high=1):
     if low < x < high and low < y < high:
         ind_x = np.argmax(np.where(xedges > x, 1, 0)) - 1

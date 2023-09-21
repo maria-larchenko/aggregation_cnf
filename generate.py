@@ -9,7 +9,7 @@ cmd_str = 'cd ./coagulation-diffusion-2d/run_folder/ \n' \
 subprocess.run(cmd_str, shell=True)
 
 D = "e0"
-S = "10"
+S = "500"
 coag = "1"
 
 alpha = [0, ]   # [0, 9, 18, 27, 36, 45, 54, 63, 72, 90] #[(9 * i) for i in range(0, 11)]
@@ -24,19 +24,19 @@ info_str = f"coag={coag} S={S} D={D} angle=0 x_s=(.05, .5) h=6 10x10km"
 
 subprocess.run(f'echo "{info_str}" >> info.txt', shell=True)
 for x in x_s:
+    x = str(np.around(x, decimals=3))
     for y in y_s:
+        y = str(np.around(y, decimals=3))
         for a in alpha:
+            a = str(int(a))
             for v in V:
+                v = str(np.around(v, decimals=3))
                 for i in I:
-                    x = str(np.around(x, decimals=3))
-                    y = str(np.around(y, decimals=3))
-                    a = str(int(a))
-                    v = str(np.around(x, decimals=3))
                     i = str(int(i))
                     mv_str = ""
                     for s in range(0, int(S)):
                         s = str(s)
-                        mv_str += f'mv ./imgs/{s}_res_100.ppm ./{dataset_name}/"v={v} I={i} {s}_res_100.ppm" \n'
+                        mv_str += f'mv ./imgs/{s}_res_1.ppm ./{dataset_name}/"v={v} I={i} {s}_res_1.ppm" \n'
                     mv_str += f'mv ./concentration.txt ./{dataset_name}/"v={v} I={i} concentration.txt" \n'
 
                     cmd_str = f'cd ./coagulation-diffusion-2d/run_folder/ \n' \
